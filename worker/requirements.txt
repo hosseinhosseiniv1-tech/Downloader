@@ -1,0 +1,17 @@
+# Runtime dependencies for the Super Downloader worker.
+-r ../shared/python/requirements.txt
+
+rq==1.16.2
+redis==5.0.8
+aiohttp==3.9.5
+python-telegram-bot==21.6
+requests==2.32.3
+
+# yt-dlp pinned to a version that supports bgutil PO tokens and web_safari.
+yt-dlp>=2025.5.22
+
+# bgutil PO token provider plugin (required for YouTube extractor_args).
+bgutil-ytdlp-pot-provider==1.1.0
+
+# Needed for cookies-from-browser + ffmpeg post-processing.
+ffmpeg-python==0.2.0

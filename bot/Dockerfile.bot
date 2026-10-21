@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    TZ=UTC
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        ca-certificates \
+        curl \
+        gettext \
+        tini \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system --gid 10001 bot \
+    && useradd --system --uid 10001 --gid bot --create-home --shell /usr/sbin/nologin bot \
+    && mkdir -p /app \
+    && chown -R bot:bot /app
+
+WORKDIR /app
+
+COPY shared/python /app/shared/python
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install -e /app/shared/python
+
+COPY bot/requirements.txt /app/bot/requirements.txt
+RUN python -m pip install -r /app/bot/requirements.txt
+
+COPY bot /app/bot
+
+# Compile gettext catalogs at build time so a missing .po never breaks runtime.
+RUN if [ -d /app/bot/locales ]; then \
+        for d in /app/bot/locales/*/LC_MESSAGES; do \
+            if [ -f "$d/messages.po" ]; then \
+                msgfmt -o "$d/messages.mo" "$d/messages.po"; \
+            fi; \
+        done; \
+    fi
+
+ENV PYTHONPATH=/app:/app/bot:/app/shared/python
+
+RUN python -c "import aiogram; import download_core; print('aiogram', aiogram.__version__)"
+
+USER bot
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-m", "bot.main"]

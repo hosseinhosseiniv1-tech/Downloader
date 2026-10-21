@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1.7
+FROM alpine:3.20 AS base
+
+ARG XRAY_VERSION=v1.8.24
+
+RUN apk add --no-cache \
+        ca-certificates \
+        curl \
+        jq \
+        tini \
+        tzdata \
+    && mkdir -p /etc/xray /var/log/xray
+
+# Download the official Xray-core release for the target arch.
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+        x86_64)  XRAY_ARCH=64 ;; \
+        aarch64) XRAY_ARCH=arm64-v8a ;; \
+        *) echo "unsupported arch: $arch" && exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/xray.zip \
+        "https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-${XRAY_ARCH}.zip"; \
+    apk add --no-cache unzip; \
+    unzip -o /tmp/xray.zip -d /usr/local/bin xray; \
+    chmod +x /usr/local/bin/xray; \
+    rm -f /tmp/xray.zip; \
+    /usr/local/bin/xray version
+
+# Non-root user for the runtime.
+RUN addgroup -S -g 10001 xray \
+    && adduser -S -u 10001 -G xray xray \
+    && chown -R xray:xray /etc/xray /var/log/xray
+
+COPY xray/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+USER xray
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]

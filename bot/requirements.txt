@@ -1,0 +1,10 @@
+-r ../shared/python/requirements.txt
+
+aiogram==3.13.1
+redis==5.0.8
+rq==1.16.2
+aiohttp==3.9.5
+aiohttp-socks==0.9.1
+python-dotenv==1.0.1
+Babel==2.15.0
+pytz==2024.1

@@ -1,0 +1,170 @@
+# Super Downloader — local development stack.
+#
+# WARNING: the values below are PUBLIC TEST CREDENTIALS. Never use them in
+# production. The VLESS URL is a public share link — fine for local dev,
+# replace it if you want a stable proxy.
+#
+#   - TELEGRAM_API_ID=2040
+#   - TELEGRAM_API_HASH=b18441a1ff607e10a989891a5462e627
+#   - TELEGRAM_BOT_TOKEN=...  (create a test bot via @BotFather)
+#
+# Usage:
+#   cp .env.example .env.local
+#   # fill TELEGRAM_BOT_TOKEN in .env.local
+#   docker compose --env-file .env.local up --build
+#
+# Exposed locally:
+#   - web     : http://localhost:5173
+#   - api     : http://localhost:8080
+#   - bot     : http://localhost:8080/health  (internal, reachable via api)
+#   - local Bot API : http://localhost:8081
+#   - Redis   : redis://localhost:6379
+#   - POT     : http://localhost:4416
+#   - Xray    : socks5://localhost:10808
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  local-bot-api:
+    build:
+      context: .
+      dockerfile: local-bot-api/Dockerfile.localbotapi
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-2040}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-b18441a1ff607e10a989891a5462e627}
+      TELEGRAM_LOCAL: "true"
+    volumes:
+      - bot-api-data:/var/lib/telegram-bot-api
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+
+  pot-provider:
+    build:
+      context: .
+      dockerfile: pot-provider/Dockerfile.pot
+    ports:
+      - "4416:4416"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4416/ping || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  xray:
+    build:
+      context: .
+      dockerfile: xray/Dockerfile.xray
+    environment:
+      VLESS_PROXY_URL: ${VLESS_PROXY_URL:-vless://cf8a6224-1855-45a0-be64-76289bac5b54@104.19.49.238:443?encryption=none&security=tls&sni=misty-garden-fa6c-03a4df3e.pages.dev&fp=chrome&ech=cloudflare-ech.com%2Budp%3A%2F%2F1.1.1.1&type=ws&host=misty-garden-fa6c-03a4df3e.pages.dev&path=%2F98643feed4c6#local}
+    ports:
+      - "10808:10808"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 10808 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile.bot
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env.local}
+      BOT_USERNAME: ${BOT_USERNAME:-StoaderBot}
+      REDIS_PRIVATE_URL: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_BOT_API_URL: http://local-bot-api:8081
+      POT_SERVER_URL: http://pot-provider:4416
+      PROXY_URL: ${PROXY_URL:-socks5://xray:10808}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      HEALTH_PORT: "8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      local-bot-api:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile.worker
+    environment:
+      REDIS_PRIVATE_URL: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_BOT_API_URL: http://local-bot-api:8081
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN in .env.local}
+      POT_SERVER_URL: http://pot-provider:4416
+      PROXY_URL: ${PROXY_URL:-socks5://xray:10808}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DOWNLOAD_DIR: /tmp/downloads
+    depends_on:
+      redis:
+        condition: service_healthy
+      local-bot-api:
+        condition: service_started
+      pot-provider:
+        condition: service_started
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile.api
+    environment:
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
+      REDIS_PRIVATE_URL: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      LOCAL_BOT_API_URL: http://local-bot-api:8081
+      METADATA_SERVICE_URL: http://bot:8080
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      PORT: "8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"   # conflict with bot's health port on the same host; see note below
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile.web
+      args:
+        VITE_API_BASE: http://localhost:8081
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+volumes:
+  redis-data:
+  bot-api-data:

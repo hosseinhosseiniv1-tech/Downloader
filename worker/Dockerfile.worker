@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.11-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    DOWNLOAD_DIR=/tmp/downloads \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# FFmpeg is required for audio extraction and video muxing.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        ca-certificates \
+        curl \
+        tini \
+        gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root runtime user.
+RUN groupadd --system --gid 10001 worker \
+    && useradd --system --uid 10001 --gid worker --create-home --shell /usr/sbin/nologin worker \
+    && mkdir -p /tmp/downloads /app \
+    && chown -R worker:worker /tmp/downloads /app
+
+WORKDIR /app
+
+# Copy shared module first (highest-churn layer last).
+COPY shared/python /app/shared/python
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && python -m pip install -e /app/shared/python
+
+# Copy worker source and install dependencies.
+COPY worker/requirements.txt /app/worker/requirements.txt
+RUN python -m pip install -r /app/worker/requirements.txt
+
+COPY worker /app/worker
+
+ENV PYTHONPATH=/app:/app/worker
+
+# Verify yt-dlp + bgutil plugin are importable at build time.
+RUN python -c "import yt_dlp; import bgutil_ytdlp_pot_provider; print('yt-dlp', yt_dlp.version.__version__)"
+
+USER worker
+
+# tini reaps orphaned ffmpeg processes.
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-m", "worker.main"]

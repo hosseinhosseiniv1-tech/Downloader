@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1.7
+# Wrap the upstream bgutil image so we can set sane defaults without
+# rebuilding it. The worker's plugin (bgutil-ytdlp-pot-provider) talks to
+# this server over HTTP on port 4416.
+FROM brainicism/bgutil-ytdlp-pot-provider:latest
+
+ENV NODE_ENV=production \
+    PORT=4416
+
+EXPOSE 4416
+# The upstream image has its own CMD; we do not override it.

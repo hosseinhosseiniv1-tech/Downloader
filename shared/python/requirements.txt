@@ -1,0 +1,3 @@
+# Dependencies of the shared download_core module.
+yt-dlp>=2025.5.22
+requests>=2.31.0
