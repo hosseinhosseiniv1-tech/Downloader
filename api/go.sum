@@ -1,2 +1,0 @@
-# Run `go mod tidy` in api/ after copying go.mod; the lock file is
-# generated automatically by the Go toolchain. Do not edit by hand.
